@@ -1,0 +1,214 @@
+@extends('layouts.app')
+
+@section('content')
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex align-items-center">
+            <h1 class="h3 mb-0 text-gray-800 me-3">Lead</h1>
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="viewSelector" data-bs-toggle="dropdown" aria-expanded="false">
+                   Vista: <strong>{{ $currentView->name ?? 'Standard' }}</strong>
+                </button>
+                <ul class="dropdown-menu" aria-labelledby="viewSelector">
+                    <li><h6 class="dropdown-header">Viste Disponibili</h6></li>
+                    <li><a class="dropdown-item" href="{{ route('leads.index') }}">Vista di Default</a></li>
+                    
+                    {{-- CORREZIONE: Sostituito '$availableViews' con '$listViews', la variabile corretta passata dal controller. --}}
+                    @if($listViews->isNotEmpty())
+                        @foreach($listViews as $view)
+                        <li><a class="dropdown-item" href="{{ route('leads.index', ['view_id' => $view->id]) }}">{{ $view->name }}</a></li>
+                        @endforeach
+                    @endif
+                    
+                    @if(isset($currentView) && is_numeric($currentView->id))
+                        <li><hr class="dropdown-divider"></li>
+                        <li><h6 class="dropdown-header">Azioni sulla Vista</h6></li>
+                        <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#customizeViewModal" id="editCurrentViewBtn"><i class="bi bi-pencil-fill me-2"></i>Modifica Vista Corrente</a></li>
+                        <li>
+                            <a href="#" class="dropdown-item text-danger" id="deleteCurrentViewBtn" data-view-name="{{ $currentView->name }}" data-delete-url="{{ route('list_views.destroy', $currentView->id) }}">
+                                <i class="bi bi-trash-fill me-2"></i>Elimina Vista Corrente
+                            </a>
+                        </li>
+                    @endif
+                </ul>
+            </div>
+        </div>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#customizeViewModal" id="createNewViewBtn" title="Personalizza Vista"><i class="bi bi-gear-fill"></i></button>
+            <a href="{{ route('leads.export') }}" class="btn btn-outline-secondary" data-bs-toggle="tooltip" title="Esporta CSV"><i class="bi bi-download"></i></a>
+            <a href="{{ route('leads.create') }}" class="btn btn-success" data-bs-toggle="tooltip" title="Crea Nuovo Lead"><i class="bi bi-plus-lg"></i></a>
+        </div>
+    </div>
+
+    @if ($message = Session::get('success'))
+        <div class="alert alert-success alert-dismissible fade show" role="alert">{{ $message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+    @endif
+
+    <div class="card shadow mb-4">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            @foreach($columns as $column)
+                                <th>{{ $columnLabels[$column] ?? ucfirst(str_replace('_', ' ', $column)) }}</th>
+                            @endforeach
+                            <th width="150px">Azioni</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @forelse ($leads as $lead)
+                        <tr>
+                            @foreach($columns as $column)
+                                <td>
+                                    @if($column === 'company_id') {{ $lead->company->name ?? 'N/D' }}
+                                    @elseif($column === 'assigned_to_id') {{ $lead->assignedTo->name ?? 'N/D' }}
+                                    @else {{ $lead->$column }} @endif
+                                </td>
+                            @endforeach
+                            <td class="text-nowrap">
+                                <form action="{{ route('leads.destroy', $lead->id) }}" method="POST" class="d-inline" onsubmit="return confirm('Sei sicuro di voler eliminare questo lead?');">
+                                    <a href="{{ route('leads.show', $lead->id) }}" class="btn btn-info btn-sm" data-bs-toggle="tooltip" title="Visualizza"><i class="bi bi-eye-fill"></i></a>
+                                    <a href="{{ route('leads.edit', $lead->id) }}" class="btn btn-primary btn-sm" data-bs-toggle="tooltip" title="Modifica"><i class="bi bi-pencil-fill"></i></a>
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit" class="btn btn-danger btn-sm" data-bs-toggle="tooltip" title="Elimina"><i class="bi bi-trash-fill"></i></button>
+                                </form>
+                            </td>
+                        </tr>
+                        @empty
+                        <tr>
+                            <td colspan="{{ count($columns) + 1 }}" class="text-center">Nessun lead trovato.</td>
+                        </tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        @if($leads->hasPages())
+        <div class="card-footer">
+            {!! $leads->appends(request()->except('page'))->links() !!}
+        </div>
+        @endif
+    </div>
+</div>
+
+{{-- La modale viene inclusa qui. È fondamentale che $listViews esista. --}}
+@include('partials.modal_customize_view', [
+    'moduleClass' => 'App\\Models\\Lead',
+    'currentView' => $currentView,
+    'defaultColumns' => $defaultColumns,
+    'columnLabels' => $columnLabels
+])
+
+@endsection
+
+@push('scripts')
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Inizializza i tooltip di Bootstrap
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl)
+        });
+
+        const customizeViewModal = document.getElementById('customizeViewModal');
+        if (customizeViewModal) {
+            const form = customizeViewModal.querySelector('#customizeViewForm');
+            const modalTitle = customizeViewModal.querySelector('.modal-title');
+            const viewIdInput = customizeViewModal.querySelector('#viewIdInput');
+            const viewNameInput = customizeViewModal.querySelector('#viewNameInput');
+            const methodInput = customizeViewModal.querySelector('#formMethodInput');
+            const allCheckboxes = customizeViewModal.querySelectorAll('.column-checkbox');
+            const currentViewData = @json($currentView);
+            
+            customizeViewModal.addEventListener('show.bs.modal', function (event) {
+                const button = event.relatedTarget;
+                const isEdit = button && button.id === 'editCurrentViewBtn';
+                
+                form.reset(); // Resetta sempre il form all'apertura
+                allCheckboxes.forEach(checkbox => { checkbox.checked = false; }); // Deseleziona tutte le checkbox
+                
+                if (isEdit && currentViewData && typeof currentViewData.id === 'number') {
+                    // Modalità Modifica
+                    modalTitle.textContent = 'Modifica Vista: ' + currentViewData.name;
+                    viewIdInput.value = currentViewData.id;
+                    viewNameInput.value = currentViewData.name;
+                    methodInput.value = 'PUT';
+                    form.action = `{{ url('list_views') }}/${currentViewData.id}`;
+                    currentViewData.columns.forEach(column => {
+                        const checkbox = customizeViewModal.querySelector(`#column-${column}`);
+                        if(checkbox) checkbox.checked = true;
+                    });
+                } else {
+                    // Modalità Creazione
+                    modalTitle.textContent = 'Crea Nuova Vista';
+                    viewIdInput.value = '';
+                    viewNameInput.value = '';
+                    methodInput.value = 'POST';
+                    form.action = "{{ route('list_views.store') }}";
+                    const defaultColumns = @json($defaultColumns);
+                    defaultColumns.forEach(column => {
+                        const checkbox = customizeViewModal.querySelector(`#column-${column}`);
+                        if(checkbox) checkbox.checked = true;
+                    });
+                }
+            });
+
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(form);
+
+                // Workaround per FormData che non include _method
+                const fetchOptions = {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                    body: formData,
+                };
+                
+                fetch(form.action, fetchOptions)
+                .then(response => response.json().then(data => ({ ok: response.ok, data })))
+                .then(({ ok, data }) => {
+                    if (!ok) { throw data; }
+                    
+                    if (data.success && data.view_id) {
+                        const currentUrl = new URL(window.location.href);
+                        currentUrl.searchParams.set('view_id', data.view_id);
+                        window.location.href = currentUrl.toString();
+                    } else {
+                        alert(data.message || 'Si è verificato un errore sconosciuto.');
+                    }
+                })
+                .catch(errorData => {
+                    let errorMessage = "Si è verificato un errore sconosciuto.";
+                    if (errorData.errors) {
+                        errorMessage = "Correggi i seguenti errori:\n\n";
+                        for (const field in errorData.errors) { errorMessage += `- ${errorData.errors[field].join(', ')}\n`; }
+                    } else if (errorData.message) { errorMessage = errorData.message; }
+                    alert(errorMessage);
+                });
+            });
+        }
+
+        const deleteBtn = document.getElementById('deleteCurrentViewBtn');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                const viewName = this.getAttribute('data-view-name');
+                const deleteUrl = this.getAttribute('data-delete-url');
+                if (confirm(`Sei sicuro di voler eliminare la vista "${viewName}"? L'azione è irreversibile.`)) {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = deleteUrl;
+                    form.innerHTML = `
+                        @csrf
+                        @method('DELETE')
+                    `;
+                    document.body.appendChild(form);
+                    form.submit();
+                }
+            });
+        }
+    });
+</script>
+@endpush
